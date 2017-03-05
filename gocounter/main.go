@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 )
 
 func main() {
@@ -36,16 +37,21 @@ func main() {
 	urlsCh := make(chan string, bufferSize)
 	resCh := make(chan int)
 
+	var wg sync.WaitGroup
+	quitCh := make(chan struct{})
+
 	scanner := bufio.NewScanner(os.Stdin)
 	go func() {
 		for scanner.Scan() {
 			s := scanner.Text()
 			select {
 			case urlsCh <- s:
+				wg.Add(1)
 			default:
 				fmt.Printf("Urls buffer is over capacity. Dropping %s ...\n", s)
 			}
 		}
+		close(quitCh)
 	}()
 
 	for {
@@ -66,6 +72,13 @@ func main() {
 		case count := <-resCh:
 			total += count
 			goroutines--
+			wg.Done()
+		case <-quitCh:
+			go func() {
+				wg.Wait()
+				fmt.Printf("Total: %d\n", total)
+				os.Exit(0)
+			}()
 		}
 	}
 }
