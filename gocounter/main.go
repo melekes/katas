@@ -7,6 +7,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -16,6 +17,11 @@ import (
 )
 
 func main() {
+	var goroutines, maxGoroutines int
+	flag.IntVar(&maxGoroutines, "k", 4, "maximum number of concurrent goroutines")
+	var bufferSize int
+	flag.IntVar(&bufferSize, "b", 100, "size of the internal buffer for urls")
+
 	total := 0
 
 	c := make(chan os.Signal, 1)
@@ -27,19 +33,41 @@ func main() {
 		}
 	}()
 
+	urlsCh := make(chan string, bufferSize)
+	resCh := make(chan int)
+
 	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
-		s := scanner.Text()
-		count, err := GetAndCountGoAt(s)
-		if err != nil {
-			fmt.Println(err.Error())
-		} else {
-			fmt.Printf("Count for %s: %d\n", s, count)
+	go func() {
+		for scanner.Scan() {
+			s := scanner.Text()
+			select {
+			case urlsCh <- s:
+			default:
+				fmt.Printf("Urls buffer is over capacity. Dropping %s ...\n", s)
+			}
+		}
+	}()
+
+	for {
+		select {
+		case url := <-urlsCh:
+			if goroutines < maxGoroutines {
+				goroutines++
+				go func(url string, resCh chan<- int) {
+					count, err := GetAndCountGoAt(url)
+					if err != nil {
+						fmt.Println(err.Error())
+					} else {
+						fmt.Printf("Count for %s: %d\n", url, count)
+						resCh <- count
+					}
+				}(url, resCh)
+			}
+		case count := <-resCh:
 			total += count
+			goroutines--
 		}
 	}
-
-	fmt.Printf("Total: %d\n", total)
 }
 
 // GetAndCountGoAt makes an HTTP GET request to a given url and counts all the
