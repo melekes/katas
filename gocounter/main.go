@@ -68,6 +68,8 @@ func main() {
 						resCh <- count
 					}
 				}(url, resCh)
+			} else {
+				urlsCh <- url
 			}
 		case count := <-resCh:
 			total += count
